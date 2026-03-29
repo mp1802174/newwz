@@ -13,21 +13,44 @@
   .log-box .info { color: #333; }
   .log-box .warning { color: #e67e22; }
   .log-box .error { color: #e74c3c; }
-  .badge-ok { background: #2ecc71; }
-  .badge-fail { background: #e74c3c; }
+  .login-qr { width: 100%; max-width: 280px; border-radius: 10px; border: 1px solid #eee; }
 </style>
 </head>
 <body>
 <div class="container py-4">
 
+  {% if not admin_authed %}
+  <div class="row justify-content-center">
+    <div class="col-md-5 col-lg-4">
+      <div class="card p-4 mt-5">
+        <h4 class="mb-3 text-center">后台管理登录</h4>
+        {% if not admin_password_configured %}
+        <div class="alert alert-danger mb-0">服务端未配置 ADMIN_PASSWORD，无法开放公网后台。</div>
+        {% else %}
+        <p class="text-muted small">请输入共享后台密码后进入管理页面。</p>
+        <div class="mb-3">
+          <input type="password" id="adminPassword" class="form-control" placeholder="后台密码">
+        </div>
+        <button class="btn btn-primary w-100" onclick="adminLogin()">进入后台</button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% else %}
+
   <div class="d-flex justify-content-between align-items-center mb-4">
-    <h4 class="mb-0">📰 微信公众号管理系统</h4>
-    <span class="badge {% if auth_ok %}bg-success{% else %}bg-danger{% endif %} fs-6">
-      {% if auth_ok %}✅ 已登录 ({{ auth_time }}){% else %}❌ 未登录{% endif %}
-    </span>
+    <div>
+      <h4 class="mb-1">微信公众号管理系统</h4>
+      <div class="text-muted small">公网后台已启用密码保护</div>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge {% if auth_ok %}bg-success{% else %}bg-danger{% endif %} fs-6">
+        {% if auth_ok %}已登录微信 ({{ auth_time }}){% else %}未登录微信{% endif %}
+      </span>
+      <button class="btn btn-sm btn-outline-secondary" onclick="logoutAdmin()">退出后台</button>
+    </div>
   </div>
 
-  <!-- 统计卡片 -->
   <div class="row g-3 mb-4">
     {% for label, key, color in [('文章总数','total','primary'),('已发布','published','success'),('待发布','pending','warning'),('公众号','accounts','info')] %}
     <div class="col-6 col-md-3">
@@ -40,20 +63,32 @@
   </div>
 
   <div class="row g-3">
-
-    <!-- 左列：操作 -->
     <div class="col-md-6">
-
-      <!-- 微信登录 -->
       <div class="card p-3 mb-3">
-        <h6 class="mb-3">🔑 微信登录</h6>
-        <p class="text-muted small mb-2">点击后将在<strong>服务器本机</strong>弹出浏览器，请前往服务器操作扫码。<br>如在本机运行，浏览器会直接弹出。</p>
-        <button class="btn btn-primary w-100" onclick="doLogin()">扫码登录 / 刷新凭据</button>
+        <h6 class="mb-3">微信扫码登录</h6>
+        <p class="text-muted small mb-3">点击后由服务端生成二维码截图并显示在网页中，你可直接在当前网页扫码登录。</p>
+        <div class="d-grid gap-2 mb-3">
+          <button class="btn btn-primary" onclick="doLogin()">生成二维码 / 刷新凭据</button>
+        </div>
+        {% if not auth_ok %}
+        <div class="alert alert-warning py-2 px-3 mb-3 text-center" style="font-size:.9rem">微信凭据未登录或已失效，请点击上方按钮扫码登录</div>
+        {% endif %}
+        <div id="loginPanel" class="text-center">
+          <div class="text-muted small mb-2" id="loginMessage">{{ login_session.message if login_session else '尚未启动扫码登录' }}</div>
+          {% if login_session and login_session.qr_base64 %}
+          <img id="loginQr" class="login-qr" src="{{ login_session.qr_base64 }}" alt="微信扫码二维码">
+          {% else %}
+          <img id="loginQr" class="login-qr d-none" src="" alt="微信扫码二维码">
+          {% endif %}
+          <div class="small text-muted mt-2" id="loginStatusLine">
+            状态：{{ login_session.status if login_session else 'idle' }}
+            {% if login_session and login_session.expires_in %}，剩余 {{ login_session.expires_in }} 秒{% endif %}
+          </div>
+        </div>
       </div>
 
-      <!-- 抓取文章 -->
       <div class="card p-3 mb-3">
-        <h6 class="mb-3">🕷️ 抓取文章</h6>
+        <h6 class="mb-3">抓取文章</h6>
         <div class="input-group mb-2">
           <span class="input-group-text">每号篇数</span>
           <input type="number" id="crawlLimit" class="form-control" value="10" min="1" max="20">
@@ -63,9 +98,8 @@
         </div>
       </div>
 
-      <!-- 发布到论坛 -->
       <div class="card p-3 mb-3">
-        <h6 class="mb-3">📤 发布到 Discuz 论坛</h6>
+        <h6 class="mb-3">发布到 Discuz 论坛</h6>
         <p class="text-muted small mb-2">将已采集正文、尚未发布的文章推送到论坛。</p>
         <div class="input-group mb-2">
           <span class="input-group-text">本次数量</span>
@@ -73,28 +107,23 @@
         </div>
         <button class="btn btn-warning w-100" onclick="doPublish()">批量发布</button>
       </div>
-
     </div>
 
-    <!-- 右列：公众号管理 -->
     <div class="col-md-6">
       <div class="card p-3 mb-3">
-        <h6 class="mb-3">📋 监控的公众号</h6>
-
-        <!-- 添加 -->
+        <h6 class="mb-3">监控的公众号</h6>
         <div class="input-group mb-3">
           <input type="text" id="newAccount" class="form-control" placeholder="输入公众号名称">
           <button class="btn btn-outline-primary" onclick="addAccount()">添加</button>
         </div>
 
-        <!-- 列表 -->
         <ul class="list-group" id="accountList">
           {% for name in accounts %}
           <li class="list-group-item d-flex justify-content-between align-items-center">
             <span>{{ name }}</span>
             <div class="btn-group btn-group-sm">
               <button class="btn btn-outline-success" onclick="crawlOne('{{ name }}')">抓取</button>
-              <button class="btn btn-outline-danger"  onclick="removeAccount('{{ name }}')">移除</button>
+              <button class="btn btn-outline-danger" onclick="removeAccount('{{ name }}')">移除</button>
             </div>
           </li>
           {% else %}
@@ -107,13 +136,11 @@
         </div>
       </div>
     </div>
-
   </div>
 
-  <!-- 操作日志 -->
   <div class="card p-3 mt-2">
     <div class="d-flex justify-content-between mb-2">
-      <h6 class="mb-0">📜 操作日志</h6>
+      <h6 class="mb-0">操作日志</h6>
       <button class="btn btn-sm btn-outline-secondary" onclick="clearLogs()">清空</button>
     </div>
     <div class="log-box" id="logBox">
@@ -123,9 +150,9 @@
     </div>
   </div>
 
+  {% endif %}
 </div>
 
-<!-- Toast 提示 -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
   <div id="toast" class="toast align-items-center border-0" role="alert">
     <div class="d-flex">
@@ -138,6 +165,8 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 const toast = new bootstrap.Toast(document.getElementById('toast'), {delay: 4000});
+const csrfToken = {{ csrf_token|tojson if admin_authed else 'null' }};
+let loginPollTimer = null;
 
 function showToast(msg, ok=true) {
   const el = document.getElementById('toast');
@@ -148,26 +177,85 @@ function showToast(msg, ok=true) {
 
 function appendLog(entry) {
   const box = document.getElementById('logBox');
+  if (!box) return;
   const div = document.createElement('div');
   div.className = entry.level || 'info';
   div.innerHTML = `<span class="text-muted">${entry.time}</span> ${entry.msg}`;
   box.prepend(div);
 }
 
-async function post(url, data={}) {
+async function post(url, data={}, withCsrf=true) {
+  const headers = {'Content-Type': 'application/json'};
+  if (withCsrf && csrfToken) headers['X-CSRF-Token'] = csrfToken;
   const r = await fetch(url, {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers,
     body: JSON.stringify(data)
   });
   return r.json();
 }
 
+async function adminLogin() {
+  const password = document.getElementById('adminPassword').value;
+  const r = await post('/api/admin/login', {password}, false);
+  showToast(r.message, r.success);
+  if (r.success) setTimeout(() => location.reload(), 500);
+}
+
+async function logoutAdmin() {
+  const r = await post('/api/admin/logout');
+  showToast(r.message, r.success);
+  if (r.success) setTimeout(() => location.reload(), 300);
+}
+
+function renderLoginState(login, auth, authTime) {
+  if (!login) return;
+  const qr = document.getElementById('loginQr');
+  const msg = document.getElementById('loginMessage');
+  const line = document.getElementById('loginStatusLine');
+  if (msg) msg.textContent = login.message || '等待中';
+  if (line) line.textContent = `状态：${login.status || 'idle'}${login.expires_in ? `，剩余 ${login.expires_in} 秒` : ''}${auth ? `，已登录于 ${authTime}` : ''}`;
+  if (qr) {
+    if (login.qr_base64) {
+      qr.src = login.qr_base64;
+      qr.classList.remove('d-none');
+    } else if (!auth) {
+      qr.src = '';
+      qr.classList.add('d-none');
+    }
+  }
+}
+
+async function refreshLoginStatus() {
+  const r = await fetch('/api/login_status').then(r => r.json());
+  if (!r.success) return;
+  renderLoginState(r.login, r.auth, r.auth_time);
+  if (['success', 'error', 'timeout'].includes(r.login.status)) {
+    stopLoginPolling();
+    if (r.login.message) showToast(r.login.message, r.login.status === 'success');
+    if (r.login.status === 'success') setTimeout(() => location.reload(), 1200);
+  }
+}
+
+function startLoginPolling() {
+  stopLoginPolling();
+  loginPollTimer = setInterval(refreshLoginStatus, 2000);
+}
+
+function stopLoginPolling() {
+  if (loginPollTimer) {
+    clearInterval(loginPollTimer);
+    loginPollTimer = null;
+  }
+}
+
 async function doLogin() {
-  showToast('已发送登录请求，请稍候...', true);
+  showToast('正在生成二维码，请稍候...', true);
   const r = await post('/api/login');
   showToast(r.message, r.success);
+  if (r.login) renderLoginState(r.login, false, '');
   appendLog({time: now(), level: r.success ? 'info' : 'error', msg: r.message});
+  if (r.success) startLoginPolling();
 }
 
 async function doCrawlAll() {
@@ -216,21 +304,29 @@ async function doPublish() {
 }
 
 function clearLogs() {
-  document.getElementById('logBox').innerHTML = '';
+  const el = document.getElementById('logBox');
+  if (el) el.innerHTML = '';
 }
 
 function now() {
   return new Date().toLocaleString('zh-CN');
 }
 
-// 每 30 秒静默刷新日志
+{% if admin_authed %}
 setInterval(async () => {
   const r = await fetch('/api/logs').then(r => r.json());
+  if (!r.logs) return;
   const box = document.getElementById('logBox');
+  if (!box) return;
   box.innerHTML = r.logs.map(e =>
     `<div class="${e.level}"><span class="text-muted">${e.time}</span> ${e.msg}</div>`
   ).join('');
 }, 30000);
+
+{% if login_session and login_session.status in ['starting', 'pending'] %}
+startLoginPolling();
+{% endif %}
+{% endif %}
 </script>
 </body>
 </html>

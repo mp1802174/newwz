@@ -4,8 +4,8 @@
 数据库操作 - WZ主库 & Discuz论坛库
 """
 
-import time
 import datetime
+import time
 
 import mysql.connector
 
@@ -14,9 +14,11 @@ import config as cfg
 
 # ─── 连接 ─────────────────────────────────────────────────────────────────────
 
+
 def _wz_conn():
     """获取 WZ 主库连接"""
     return mysql.connector.connect(**cfg.WZ_DB, autocommit=True)
+
 
 
 def _discuz_conn():
@@ -25,6 +27,7 @@ def _discuz_conn():
 
 
 # ─── 初始化 ────────────────────────────────────────────────────────────────────
+
 
 def init_table():
     """
@@ -53,47 +56,69 @@ def init_table():
 
 # ─── 文章入库 ──────────────────────────────────────────────────────────────────
 
+
 def save_articles(articles):
     """
-    批量保存文章，URL 已存在则跳过（INSERT IGNORE）。
+    批量保存文章，URL 已存在时允许补写正文。
 
     Args:
         articles: list of dict，每项需含：
-                  account_name / title / article_url / publish_timestamp
+                  account_name / title / article_url / publish_timestamp / content
 
     Returns:
-        int: 新增入库的行数
+        dict: inserted / updated
     """
     if not articles:
-        return 0
+        return {'inserted': 0, 'updated': 0}
 
     conn = _wz_conn()
     cursor = conn.cursor()
+    inserted = 0
+    updated = 0
 
-    sql = """
-        INSERT IGNORE INTO wechat_articles
-            (account_name, title, article_url, publish_timestamp, source_type)
-        VALUES (%s, %s, %s, %s, 'wechat')
-    """
-    rows = [
-        (
-            a['account_name'],
-            a['title'],
-            a['article_url'],
-            a['publish_timestamp'] if isinstance(a['publish_timestamp'], datetime.datetime)
-            else datetime.datetime.now(),
+    for article in articles:
+        publish_timestamp = article.get('publish_timestamp')
+        if not isinstance(publish_timestamp, datetime.datetime):
+            publish_timestamp = datetime.datetime.now()
+
+        cursor.execute(
+            """
+            INSERT INTO wechat_articles
+                (account_name, title, article_url, publish_timestamp, content, source_type)
+            VALUES (%s, %s, %s, %s, %s, 'wechat')
+            ON DUPLICATE KEY UPDATE
+                account_name = VALUES(account_name),
+                title = VALUES(title),
+                publish_timestamp = VALUES(publish_timestamp),
+                content = CASE
+                    WHEN (content IS NULL OR LENGTH(content) = 0)
+                         AND VALUES(content) IS NOT NULL
+                         AND LENGTH(VALUES(content)) > 0
+                    THEN VALUES(content)
+                    ELSE content
+                END
+            """,
+            (
+                article['account_name'],
+                article['title'],
+                article['article_url'],
+                publish_timestamp,
+                article.get('content'),
+            ),
         )
-        for a in articles
-    ]
 
-    cursor.executemany(sql, rows)
-    count = cursor.rowcount
+        if cursor.rowcount == 1:
+            inserted += 1
+        elif cursor.rowcount == 2:
+            updated += 1
+
     cursor.close()
     conn.close()
-    return count
+    return {'inserted': inserted, 'updated': updated}
 
 
 # ─── 文章查询 ──────────────────────────────────────────────────────────────────
+
 
 def get_articles(limit=100, account=None):
     """
@@ -125,6 +150,7 @@ def get_articles(limit=100, account=None):
     cursor.close()
     conn.close()
     return rows
+
 
 
 def get_stats():
@@ -164,18 +190,19 @@ def get_stats():
 
 # ─── 论坛发布 ──────────────────────────────────────────────────────────────────
 
+
 def get_pending_articles(limit=100):
     """
     获取待发布到论坛的文章（已有正文、尚未发布）。
 
     Returns:
-        list of dict: id / title / content / account_name / publish_timestamp
+        list of dict: id / title / content / account_name / publish_timestamp / article_url
     """
     conn = _wz_conn()
     cursor = conn.cursor(dictionary=True)
     cursor.execute(
         """
-        SELECT id, title, content, account_name, publish_timestamp
+        SELECT id, title, content, account_name, publish_timestamp, article_url
         FROM wechat_articles
         WHERE forum_published IS NULL
           AND content IS NOT NULL
@@ -191,6 +218,7 @@ def get_pending_articles(limit=100):
     return rows
 
 
+
 def mark_published(article_id):
     """将文章标记为已发布到论坛"""
     conn = _wz_conn()
@@ -202,6 +230,7 @@ def mark_published(article_id):
     conn.commit()
     cursor.close()
     conn.close()
+
 
 
 def publish_to_discuz(title, content):
@@ -218,16 +247,15 @@ def publish_to_discuz(title, content):
     Raises:
         Exception: 数据库写入失败时抛出
     """
-    fid      = cfg.FORUM_FID
-    author   = cfg.FORUM_AUTHOR
+    fid = cfg.FORUM_FID
+    author = cfg.FORUM_AUTHOR
     authorid = cfg.FORUM_AUTHORID
-    now      = int(time.time())
+    now = int(time.time())
 
     conn = _discuz_conn()
     cursor = conn.cursor()
 
     try:
-        # 插入主题（让 AUTO_INCREMENT 分配 tid）
         cursor.execute(
             """
             INSERT INTO pre_forum_thread
@@ -247,7 +275,6 @@ def publish_to_discuz(title, content):
         )
         tid = cursor.lastrowid
 
-        # 插入帖子正文（让 AUTO_INCREMENT 分配 pid）
         cursor.execute(
             """
             INSERT INTO pre_forum_post
@@ -264,13 +291,11 @@ def publish_to_discuz(title, content):
             (fid, tid, author, authorid, title, now, content),
         )
 
-        # 更新版块统计
         cursor.execute(
             "UPDATE pre_forum_forum SET threads = threads + 1, posts = posts + 1 WHERE fid = %s",
             (fid,),
         )
 
-        # 更新用户统计
         cursor.execute(
             "UPDATE pre_common_member_count SET posts = posts + 1, threads = threads + 1 WHERE uid = %s",
             (authorid,),

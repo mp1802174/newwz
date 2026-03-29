@@ -3,3 +3,4 @@ requests>=2.31.0
 mysql-connector-python>=8.0.32
 python-dotenv>=1.0.0
 DrissionPage>=4.0.0
+beautifulsoup4>=4.12.0
