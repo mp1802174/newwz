@@ -4,23 +4,20 @@
 微信公众号管理系统 - Flask Web 应用
 """
 
-import json
 import logging
 import datetime
 import threading
-from pathlib import Path
 
 from flask import Flask, render_template, request, jsonify
 
+import config as cfg
 import wechat
 import database
 
 # ─── 初始化 ────────────────────────────────────────────────────────────────────
 
-cfg = json.loads((Path(__file__).parent / 'config.json').read_text(encoding='utf-8'))
-
 app = Flask(__name__)
-app.secret_key = cfg['web']['secret_key']
+app.secret_key = cfg.SECRET_KEY
 
 logging.basicConfig(
     level=logging.INFO,
@@ -262,7 +259,7 @@ if __name__ == '__main__':
     except Exception as e:
         add_log(f'数据库初始化失败（请检查 config.json 中的数据库配置）: {e}', 'error')
 
-    host = cfg['web']['host']
-    port = cfg['web']['port']
+    host = cfg.WEB_HOST
+    port = cfg.WEB_PORT
     print(f'\n✅  启动成功，访问地址：http://{host if host != "0.0.0.0" else "127.0.0.1"}:{port}\n')
     app.run(host=host, port=port, debug=False, use_reloader=False)

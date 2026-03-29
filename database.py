@@ -4,31 +4,24 @@
 数据库操作 - WZ主库 & Discuz论坛库
 """
 
-import json
 import time
 import datetime
-from pathlib import Path
 
 import mysql.connector
 
+import config as cfg
 
-# ─── 配置加载 ──────────────────────────────────────────────────────────────────
 
-def _load_config():
-    path = Path(__file__).parent / 'config.json'
-    return json.loads(path.read_text(encoding='utf-8'))
-
+# ─── 连接 ─────────────────────────────────────────────────────────────────────
 
 def _wz_conn():
     """获取 WZ 主库连接"""
-    cfg = _load_config()['wz_db']
-    return mysql.connector.connect(**cfg, autocommit=True)
+    return mysql.connector.connect(**cfg.WZ_DB, autocommit=True)
 
 
 def _discuz_conn():
     """获取 Discuz 论坛库连接"""
-    cfg = _load_config()['discuz_db']
-    return mysql.connector.connect(**cfg, autocommit=False)
+    return mysql.connector.connect(**cfg.DISCUZ_DB, autocommit=False)
 
 
 # ─── 初始化 ────────────────────────────────────────────────────────────────────
@@ -225,57 +218,50 @@ def publish_to_discuz(title, content):
     Raises:
         Exception: 数据库写入失败时抛出
     """
-    cfg = _load_config()['forum']
-    fid      = cfg['fid']
-    author   = cfg['author']
-    authorid = cfg['authorid']
+    fid      = cfg.FORUM_FID
+    author   = cfg.FORUM_AUTHOR
+    authorid = cfg.FORUM_AUTHORID
     now      = int(time.time())
 
     conn = _discuz_conn()
     cursor = conn.cursor()
 
     try:
-        # 获取下一个可用 tid / pid
-        cursor.execute("SELECT MAX(tid) FROM pre_forum_thread")
-        tid = (cursor.fetchone()[0] or 0) + 1
-
-        cursor.execute("SELECT MAX(pid) FROM pre_forum_post")
-        pid = (cursor.fetchone()[0] or 0) + 1
-
-        # 插入主题
+        # 插入主题（让 AUTO_INCREMENT 分配 tid）
         cursor.execute(
             """
             INSERT INTO pre_forum_thread
-                (tid, fid, author, authorid, subject, dateline, lastpost, lastposter,
+                (fid, author, authorid, subject, dateline, lastpost, lastposter,
                  views, replies, displayorder, digest, special, attachment, moderated,
                  closed, stickreply, recommends, recommend_add, recommend_sub, heats,
                  status, isgroup, favtimes, sharetimes, stamp, icon, pushedaid, cover,
                  replycredit, relatebytag, maxposition, bgcolor, comments, hidden)
             VALUES
-                (%s, %s, %s, %s, %s, %s, %s, %s,
+                (%s, %s, %s, %s, %s, %s, %s,
                  0, 0, 0, 0, 0, 0, 0,
                  0, 0, 0, 0, 0, 0,
                  0, 0, 0, 0, -1, -1, 0, 0,
                  0, '', 1, '', 0, 0)
             """,
-            (tid, fid, author, authorid, title, now, now, author),
+            (fid, author, authorid, title, now, now, author),
         )
+        tid = cursor.lastrowid
 
-        # 插入帖子正文
+        # 插入帖子正文（让 AUTO_INCREMENT 分配 pid）
         cursor.execute(
             """
             INSERT INTO pre_forum_post
-                (pid, fid, tid, repid, first, author, authorid, subject, dateline,
+                (fid, tid, repid, first, author, authorid, subject, dateline,
                  lastupdate, updateuid, premsg, message, useip, port, invisible,
                  anonymous, usesig, htmlon, bbcodeoff, smileyoff, parseurloff,
                  attachment, rate, ratetimes, status, tags, comment, replycredit, position)
             VALUES
-                (%s, %s, %s, 0, 1, %s, %s, %s, %s,
+                (%s, %s, 0, 1, %s, %s, %s, %s,
                  0, 0, '', %s, '', 0, 0,
                  0, 1, 0, 0, 0, 0,
                  0, 0, 0, 0, '', 0, 0, 1)
             """,
-            (pid, fid, tid, author, authorid, title, now, content),
+            (fid, tid, author, authorid, title, now, content),
         )
 
         # 更新版块统计

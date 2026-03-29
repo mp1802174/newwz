@@ -1,0 +1,22 @@
+# ─── 敏感文件（绝对不要提交！）───
+.env
+config.json
+data/id_info.json
+data/name2fakeid.json
+
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+
+# ─── 日志 ───
+*.log
+app.log
+
+# ─── IDE ───
+.vscode/
+.idea/
+*.swp
+*.swo
