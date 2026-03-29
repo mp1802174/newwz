@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>微信公众号管理</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+<style>
+  body { background: #f5f6fa; }
+  .card { border: none; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  .stat-num { font-size: 2rem; font-weight: 700; }
+  .log-box { max-height: 300px; overflow-y: auto; font-size: .85rem; }
+  .log-box .info { color: #333; }
+  .log-box .warning { color: #e67e22; }
+  .log-box .error { color: #e74c3c; }
+  .badge-ok { background: #2ecc71; }
+  .badge-fail { background: #e74c3c; }
+</style>
+</head>
+<body>
+<div class="container py-4">
+
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="mb-0">📰 微信公众号管理系统</h4>
+    <span class="badge {% if auth_ok %}bg-success{% else %}bg-danger{% endif %} fs-6">
+      {% if auth_ok %}✅ 已登录 ({{ auth_time }}){% else %}❌ 未登录{% endif %}
+    </span>
+  </div>
+
+  <!-- 统计卡片 -->
+  <div class="row g-3 mb-4">
+    {% for label, key, color in [('文章总数','total','primary'),('已发布','published','success'),('待发布','pending','warning'),('公众号','accounts','info')] %}
+    <div class="col-6 col-md-3">
+      <div class="card p-3 text-center">
+        <div class="stat-num text-{{ color }}">{{ stats[key] }}</div>
+        <div class="text-muted small">{{ label }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="row g-3">
+
+    <!-- 左列：操作 -->
+    <div class="col-md-6">
+
+      <!-- 微信登录 -->
+      <div class="card p-3 mb-3">
+        <h6 class="mb-3">🔑 微信登录</h6>
+        <p class="text-muted small mb-2">点击后将在<strong>服务器本机</strong>弹出浏览器，请前往服务器操作扫码。<br>如在本机运行，浏览器会直接弹出。</p>
+        <button class="btn btn-primary w-100" onclick="doLogin()">扫码登录 / 刷新凭据</button>
+      </div>
+
+      <!-- 抓取文章 -->
+      <div class="card p-3 mb-3">
+        <h6 class="mb-3">🕷️ 抓取文章</h6>
+        <div class="input-group mb-2">
+          <span class="input-group-text">每号篇数</span>
+          <input type="number" id="crawlLimit" class="form-control" value="10" min="1" max="20">
+        </div>
+        <div class="d-grid gap-2">
+          <button class="btn btn-success" onclick="doCrawlAll()">抓取全部公众号</button>
+        </div>
+      </div>
+
+      <!-- 发布到论坛 -->
+      <div class="card p-3 mb-3">
+        <h6 class="mb-3">📤 发布到 Discuz 论坛</h6>
+        <p class="text-muted small mb-2">将已采集正文、尚未发布的文章推送到论坛。</p>
+        <div class="input-group mb-2">
+          <span class="input-group-text">本次数量</span>
+          <input type="number" id="publishLimit" class="form-control" value="20" min="1">
+        </div>
+        <button class="btn btn-warning w-100" onclick="doPublish()">批量发布</button>
+      </div>
+
+    </div>
+
+    <!-- 右列：公众号管理 -->
+    <div class="col-md-6">
+      <div class="card p-3 mb-3">
+        <h6 class="mb-3">📋 监控的公众号</h6>
+
+        <!-- 添加 -->
+        <div class="input-group mb-3">
+          <input type="text" id="newAccount" class="form-control" placeholder="输入公众号名称">
+          <button class="btn btn-outline-primary" onclick="addAccount()">添加</button>
+        </div>
+
+        <!-- 列表 -->
+        <ul class="list-group" id="accountList">
+          {% for name in accounts %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <span>{{ name }}</span>
+            <div class="btn-group btn-group-sm">
+              <button class="btn btn-outline-success" onclick="crawlOne('{{ name }}')">抓取</button>
+              <button class="btn btn-outline-danger"  onclick="removeAccount('{{ name }}')">移除</button>
+            </div>
+          </li>
+          {% else %}
+          <li class="list-group-item text-muted text-center" id="emptyHint">暂无公众号，请先添加</li>
+          {% endfor %}
+        </ul>
+
+        <div class="mt-2">
+          <a href="/articles" class="btn btn-outline-secondary btn-sm w-100">查看已抓取文章 →</a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 操作日志 -->
+  <div class="card p-3 mt-2">
+    <div class="d-flex justify-content-between mb-2">
+      <h6 class="mb-0">📜 操作日志</h6>
+      <button class="btn btn-sm btn-outline-secondary" onclick="clearLogs()">清空</button>
+    </div>
+    <div class="log-box" id="logBox">
+      {% for entry in logs %}
+      <div class="{{ entry.level }}"><span class="text-muted">{{ entry.time }}</span> {{ entry.msg }}</div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+
+<!-- Toast 提示 -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="toast" class="toast align-items-center border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toastMsg"></div>
+      <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const toast = new bootstrap.Toast(document.getElementById('toast'), {delay: 4000});
+
+function showToast(msg, ok=true) {
+  const el = document.getElementById('toast');
+  el.className = `toast align-items-center border-0 text-bg-${ok ? 'success' : 'danger'}`;
+  document.getElementById('toastMsg').textContent = msg;
+  toast.show();
+}
+
+function appendLog(entry) {
+  const box = document.getElementById('logBox');
+  const div = document.createElement('div');
+  div.className = entry.level || 'info';
+  div.innerHTML = `<span class="text-muted">${entry.time}</span> ${entry.msg}`;
+  box.prepend(div);
+}
+
+async function post(url, data={}) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  });
+  return r.json();
+}
+
+async function doLogin() {
+  showToast('已发送登录请求，请稍候...', true);
+  const r = await post('/api/login');
+  showToast(r.message, r.success);
+  appendLog({time: now(), level: r.success ? 'info' : 'error', msg: r.message});
+}
+
+async function doCrawlAll() {
+  const limit = parseInt(document.getElementById('crawlLimit').value) || 10;
+  showToast('正在抓取，请稍候...', true);
+  const r = await post('/api/crawl', {limit});
+  showToast(r.message, r.success);
+  appendLog({time: now(), level: r.success ? 'info' : 'error', msg: r.message});
+  if (r.success) setTimeout(() => location.reload(), 1500);
+}
+
+async function crawlOne(account) {
+  const limit = parseInt(document.getElementById('crawlLimit').value) || 10;
+  showToast(`正在抓取 ${account}...`, true);
+  const r = await post('/api/crawl_account', {account, limit});
+  showToast(r.message, r.success);
+  appendLog({time: now(), level: r.success ? 'info' : 'error', msg: r.message});
+  if (r.success) setTimeout(() => location.reload(), 1500);
+}
+
+async function addAccount() {
+  const input = document.getElementById('newAccount');
+  const account = input.value.trim();
+  if (!account) return;
+  showToast(`正在查找 ${account}...`, true);
+  const r = await post('/api/add_account', {account});
+  showToast(r.message, r.success);
+  appendLog({time: now(), level: r.success ? 'info' : 'warning', msg: r.message});
+  if (r.success) { input.value = ''; setTimeout(() => location.reload(), 800); }
+}
+
+async function removeAccount(account) {
+  if (!confirm(`确认移除公众号：${account}？`)) return;
+  const r = await post('/api/remove_account', {account});
+  showToast(r.message, r.success);
+  if (r.success) setTimeout(() => location.reload(), 600);
+}
+
+async function doPublish() {
+  const limit = parseInt(document.getElementById('publishLimit').value) || 20;
+  showToast('正在发布，请稍候...', true);
+  const r = await post('/api/publish', {limit});
+  showToast(r.message, r.success);
+  appendLog({time: now(), level: r.success ? 'info' : 'error', msg: r.message});
+  if (r.success) setTimeout(() => location.reload(), 1500);
+}
+
+function clearLogs() {
+  document.getElementById('logBox').innerHTML = '';
+}
+
+function now() {
+  return new Date().toLocaleString('zh-CN');
+}
+
+// 每 30 秒静默刷新日志
+setInterval(async () => {
+  const r = await fetch('/api/logs').then(r => r.json());
+  const box = document.getElementById('logBox');
+  box.innerHTML = r.logs.map(e =>
+    `<div class="${e.level}"><span class="text-muted">${e.time}</span> ${e.msg}</div>`
+  ).join('');
+}, 30000);
+</script>
+</body>
+</html>
